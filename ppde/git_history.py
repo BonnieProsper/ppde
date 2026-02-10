@@ -31,6 +31,8 @@ class GitHistoryParser:
             cwd=self.repo_path,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
         )
         if result.returncode != 0:
             raise ValueError(f"Not a Git repository: {repo_path}")
@@ -41,6 +43,8 @@ class GitHistoryParser:
             cwd=self.repo_path,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
         )
         if check and result.returncode != 0:
             raise RuntimeError(
@@ -61,14 +65,17 @@ class GitHistoryParser:
         max_count: int = 250,
         reference_time: Optional[datetime] = None,
     ) -> List[Commit]:
+        """
+        Extract commits with temporal filtering.
+
+        Returns commits newest-first.
+        """
 
         # Normalize reference time
         if reference_time is None:
             reference_time = datetime.now(timezone.utc)
         elif reference_time.tzinfo is None:
             reference_time = reference_time.replace(tzinfo=timezone.utc)
-
-        cutoff_time = reference_time - timedelta(days=max_age_days)
 
         if author_email is None:
             author_email = self._get_config_value("user", "email")
@@ -81,7 +88,7 @@ class GitHistoryParser:
                 "--no-merges",
                 "--format=%H|%ae|%at|%s",
                 f"--author={author_email}",
-                f"--max-count={max_count * 2}",
+                f"--max-count={max_count * 2}",  # fetch extra, filter later
                 "HEAD",
             ]
         )
@@ -98,14 +105,18 @@ class GitHistoryParser:
 
             sha, email, ts, subject = parts
 
-            timestamp = datetime.fromtimestamp(
-                int(ts), tz=timezone.utc
-            )
+            commit_time = datetime.fromtimestamp(int(ts), tz=timezone.utc)
+            delta = reference_time - commit_time
 
-            if timestamp < cutoff_time:
-                break
+            # Commit must not be in the future
+            if delta.total_seconds() < 0:
+                continue
 
-            commit = self._parse_commit(sha, email, timestamp, subject)
+            # Enforce strict temporal window
+            if delta > timedelta(days=max_age_days):
+                break  # log is ordered newest → oldest
+
+            commit = self._parse_commit(sha, email, commit_time, subject)
 
             if commit.python_files_changed:
                 commits.append(commit)
@@ -122,18 +133,18 @@ class GitHistoryParser:
         timestamp: datetime,
         subject: str,
     ) -> Commit:
-
         _, message, _ = self._run_git(["log", "-1", "--format=%B", sha])
         _, diff_output, _ = self._run_git(["show", "--format=", sha])
 
         file_diffs: List[FileDiff] = []
-        current_file = None
+        current_file: Optional[str] = None
         current_lines: List[str] = []
 
         for line in diff_output.splitlines():
             if line.startswith("diff --git"):
                 if current_file and current_file.endswith(".py"):
                     file_diffs.append(self._build_diff(current_file, current_lines))
+
                 match = re.search(r" b/(.+)$", line)
                 current_file = match.group(1) if match else None
                 current_lines = [line]
@@ -155,10 +166,10 @@ class GitHistoryParser:
     @staticmethod
     def _build_diff(path: str, lines: List[str]) -> FileDiff:
         additions = sum(
-            1 for l in lines if l.startswith("+") and not l.startswith("+++")
+            1 for line in lines if line.startswith("+") and not line.startswith("+++")
         )
         deletions = sum(
-            1 for l in lines if l.startswith("-") and not l.startswith("---")
+            1 for line in lines if line.startswith("-") and not line.startswith("---")
         )
         return FileDiff(
             file_path=path,
