@@ -6,7 +6,7 @@ No logic, no thresholds, no reasoning.
 """
 import ast
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import List
 
@@ -52,7 +52,7 @@ def _build_parent_map(tree: ast.Module) -> dict[ast.AST, ast.AST]:
 def _find_enclosing_function(
     node: ast.AST,
     parent_map: dict[ast.AST, ast.AST]
-) -> ast.FunctionDef | None:
+) -> ast.FunctionDef | ast.AsyncFunctionDef | None:
     current = node
     while current in parent_map:
         current = parent_map[current]
@@ -76,7 +76,7 @@ def _find_enclosing_class(
 def _find_parent_function(
     func_node: ast.FunctionDef,
     parent_map: dict[ast.AST, ast.AST]
-) -> ast.FunctionDef | None:
+) -> ast.FunctionDef | ast.AsyncFunctionDef | None:
     current = func_node
     while current in parent_map:
         current = parent_map[current]
@@ -176,7 +176,7 @@ def analyze_repo(path: Path) -> List[Explanation]:
 
     commits = get_commit_history(str(repo_path))
     table = FrequencyTable()
-    now = datetime.now()
+    now = datetime.now(timezone.utc)
 
     all_explanations = []
 

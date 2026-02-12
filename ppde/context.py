@@ -6,7 +6,7 @@ Context is the GROUP BY key for frequency counting.
 """
 import ast
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Dict, List
 
@@ -124,7 +124,7 @@ def _determine_stability(file_path: str, commits: List[Commit], now: datetime) -
     first_seen = _file_first_seen(file_path, commits)
     
     if first_seen is None:
-        return Stability.MODIFIED
+        return Stability.NEW
     
     # Rule 1 - NEW
     if (now - first_seen).total_seconds() / 86400.0 < _NEW_DAYS:
